@@ -1,20 +1,24 @@
 """ECharts decoration symbol registry.
 
 Maps short alias names (`@crown`, `@trophy`, …) to ECharts-compatible
-`path://<d-string>` symbol values. The path data is taken from lucide v1.8
-(MIT-licensed). Multi-path icons are joined into one `d` string — each
-path's leading `M` command starts a new subpath, which ECharts honors.
+`path://<d-string>` symbol values. Two sources, in priority order:
 
-Resolution: `resolve_aliases(option)` walks an `echarts_option` dict
-and replaces any string of the form `"@<name>"` with `"path://<d>"`.
+  1. `DECORATION_PATHS` (hand-curated) — small set of polished, demo-grade
+     icons (~15). Used for the most common decorations.
+  2. `lucide_paths.json` (auto-extracted) — all 1,900+ lucide icons,
+     converted from their .js source by scripts/extract_lucide_paths.py.
+
+Resolution: `resolve_aliases(option)` walks an `echarts_option` dict and
+replaces `"@<name>"` strings with `"path://<d>"`. Lookup checks the hand-
+curated set first, then falls back to the full lucide map, then to the
+NAME_ALIASES table for human-friendly synonyms (bicycle → bike, etc).
+
 This lets the LLM (or any author) write `markPoint: {symbol: "@crown"}`
-without copying ~200 chars of path data.
-
-The catalog is intentionally small — we expose only "decoration-grade"
-named icons (medals, stars, flames, gems, hearts, …). Adding more is
-trivial: drop another `(name, d)` pair into DECORATION_PATHS.
+or `{symbol: "@bicycle"}` — anything in lucide's catalog works.
 """
 
+import json
+from pathlib import Path
 from typing import Any
 
 # Each value is a single SVG path `d` string, viewBox 0 0 24 24 (lucide's).
@@ -90,9 +94,55 @@ DECORATION_PATHS: dict[str, str] = {
 }
 
 
+# Auto-extracted full lucide catalog. Loaded once at module import.
+# If the file is missing, _LUCIDE_PATHS is empty — runtime gracefully
+# falls back to DECORATION_PATHS only.
+_LUCIDE_JSON = Path(__file__).parent / "lucide_paths.json"
+try:
+    _LUCIDE_PATHS: dict[str, str] = json.loads(_LUCIDE_JSON.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    _LUCIDE_PATHS = {}
+
+# User-friendly synonyms → canonical lucide name. The LLM (or user) might
+# say "bicycle" but lucide only has "bike"; "automobile" → "car"; etc.
+# Resolution order: DECORATION_PATHS → _LUCIDE_PATHS → NAME_ALIASES → _LUCIDE_PATHS.
+NAME_ALIASES: dict[str, str] = {
+    "bicycle": "bike",
+    "automobile": "car",
+    "vehicle": "car",
+    "airplane": "plane",
+    "aeroplane": "plane",
+    "lightning": "zap",
+    "bolt": "zap",
+    "fire": "flame",
+    "diamond-shape": "diamond",
+    "telephone": "phone",
+    "mail": "mail",
+    "letter": "mail",
+    "wrench": "wrench",
+    "pencil": "pencil",
+    "magnifier": "search",
+    "magnifying-glass": "search",
+}
+
+
+def _lookup_path(name: str) -> str | None:
+    """Resolve `name` to a path-d string using the priority chain."""
+    name = name.strip().lower()
+    if name in DECORATION_PATHS:
+        return DECORATION_PATHS[name]
+    if name in _LUCIDE_PATHS:
+        return _LUCIDE_PATHS[name]
+    if name in NAME_ALIASES:
+        canonical = NAME_ALIASES[name]
+        return DECORATION_PATHS.get(canonical) or _LUCIDE_PATHS.get(canonical)
+    return None
+
+
 def resolve_aliases(node: Any) -> Any:
     """Walk an arbitrary nested structure and replace `@<name>` strings
-    (only when the name is a known decoration) with `path://<d>` strings.
+    with `path://<d>` strings. Lookup hits hand-curated DECORATION_PATHS
+    first, then the full lucide catalog, then human-friendly synonyms.
 
     Mutates dicts/lists in place; returns the same node for convenience.
     Strings that aren't `@<name>` aliases pass through unchanged.
@@ -106,12 +156,22 @@ def resolve_aliases(node: Any) -> Any:
             node[i] = resolve_aliases(v)
         return node
     if isinstance(node, str) and node.startswith("@"):
-        name = node[1:].strip().lower()
-        if name in DECORATION_PATHS:
-            return f"path://{DECORATION_PATHS[name]}"
+        path_d = _lookup_path(node[1:])
+        if path_d:
+            return f"path://{path_d}"
     return node
 
 
 def list_decoration_names() -> list[str]:
-    """Sorted catalog for prompt construction."""
+    """Sorted catalog of demo-grade icons for prompt construction.
+
+    Returns just the hand-curated set — too noisy to dump 1900 lucide
+    names into a system prompt; the LLM can pick from any lucide name
+    anyway since `_LUCIDE_PATHS` is the fallback.
+    """
     return sorted(DECORATION_PATHS.keys())
+
+
+def has_alias(name: str) -> bool:
+    """True if `@<name>` would resolve to a real path. Useful for tests."""
+    return _lookup_path(name) is not None

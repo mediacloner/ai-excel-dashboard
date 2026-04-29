@@ -186,7 +186,16 @@ The user may casually say "SVG" when they mean "a small visual symbol". Treat th
 
 **CHART-DATA-ANCHORED DECORATIONS — use ECharts `markPoint` with `@<name>` aliases:**
 
-When the user asks for an icon ON a specific data point ("a crown on the #1 bar", "a flame on the highest sales month", "a star on the top product"), DO NOT add an icon layer in container coordinates — it won't follow the bar. Use ECharts' built-in `markPoint` on the relevant series. The backend resolves `@<name>` symbol aliases to real path data:
+When the user asks for an icon ON a specific data point — *anywhere* in this list of phrasings — DO NOT use `build_icon_layer` or `add_layer`. Container-anchored icons sit in a corner of the widget; they don't follow the bar. Use ECharts `markPoint` on the relevant series instead. Triggers for markPoint (NOT icon layer):
+
+  - "on the #1 / first / second / Nth bar"
+  - "on the highest / lowest / max / min value"
+  - "on March's column" / "on Nancy Robinson's row"
+  - "next to the top product"
+  - "marker on each above-average month"
+  - any phrase that NAMES a data point or rank
+
+The backend resolves `@<name>` symbol aliases — virtually ANY lucide icon name works (`@crown`, `@trophy`, `@bike`, `@car`, `@plane`, `@flame`, `@heart`, `@thumbs-up`, `@rocket`, `@gem`, `@star`, `@medal`, `@award`, `@sparkles`, `@target`, `@diamond`, `@bell`, `@bolt`, `@coffee`, `@gift`, `@key`, `@lock`, `@map-pin`, `@phone`, `@thumbs-down`, `@flag`, …). Use kebab-case. The catalog has 1900+ icons; pick whatever the user asked for.
 
 ```
 "series": [{{
@@ -202,7 +211,27 @@ When the user asks for an icon ON a specific data point ("a crown on the #1 bar"
 }}]
 ```
 
-`type: "max"` auto-anchors to the highest value, `"min"` to lowest, or pass `{{"coord": [x, y]}}` for an explicit point. Available `@<name>` aliases: `@crown`, `@trophy`, `@award`, `@medal`, `@star`, `@sparkles`, `@flame`, `@gem`, `@heart`, `@zap`, `@rocket`, `@target`, `@diamond`, `@thumbs-up`, `@party-popper`. Recolor via `itemStyle.color`.
+**markPoint.data — three ways to pin to a specific point:**
+
+  * `{{"type": "max"}}` / `{{"type": "min"}}` / `{{"type": "average"}}` — auto-finds the value, no coordinate math needed.
+  * `{{"coord": [<value>, "<category-name>"]}}` — explicit, by name. For HORIZONTAL bar (yAxis is category), the order is `[xValue, yCategoryName]`. Example for the 2nd bar (Nancy Robinson, value 28682.15): `{{"coord": [28682.15, "Nancy Robinson"]}}`. For VERTICAL bar (xAxis is category), it's `[xCategoryName, yValue]`.
+  * `{{"value": <value>, "xAxis": <idx>, "yAxis": <idx>}}` — by axis indices, less common.
+
+**Per-point overrides — multiple decorations with different symbols on different bars:**
+
+```
+"markPoint": {{
+  "label": {{"show": false}},
+  "data": [
+    {{"type": "max", "symbol": "@crown", "symbolSize": [32,32], "itemStyle": {{"color": "#fbbf24"}}}},
+    {{"coord": [28682.15, "Nancy Robinson"], "symbol": "@bike", "symbolSize": [28,28], "itemStyle": {{"color": "#3b82f6"}}}}
+  ]
+}}
+```
+
+This lets you put a crown on #1 AND a bike on the 2nd bar in one update.
+
+**For "on the Nth bar" updates (modifying an existing chart):** call `update_widget` with `updates: {{"echarts_option": {{"series": [{{ "markPoint": {{...}} }}] }}}}`. Keep `markPoint.label.show: false` so the symbol isn't overlaid with text. Recolor each symbol via its `itemStyle.color`. The backend resolves `@<name>` to real path data before persisting.
 
 For top-N horizontal bar charts, also pass `series[0].sort: "ascending"` (with the largest value at the BOTTOM in horizontal orientation) so the visual order matches the data ranking.
 

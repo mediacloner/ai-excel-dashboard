@@ -16,6 +16,11 @@ models:
     num_ctx: 16384
     keep_alive: "5m"
     temperature: 0.3
+    # Hard cap so a runaway <think> block can't generate for minutes.
+    # Combined with `/no_think` in the system prompt this is more than
+    # enough for any single tool call — we observed runaways at 4000+
+    # tokens stalling the agent on the 2nd/3rd widget.
+    num_predict: 2048
   ingestion_agent:
     name: "qwen3:8b"
     num_ctx: 8192

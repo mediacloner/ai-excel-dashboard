@@ -24,7 +24,9 @@ from app.llm.client import _build_chat_model
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 10  # Max tool-call rounds — composition flows chain several tools
+MAX_TOOL_ROUNDS = 20  # Max tool-call rounds. Multi-widget requests can need
+# 2 rounds per widget (query_data + create_*_widget) plus retries; 10 was
+# too tight for a 3-widget dashboard with one error along the way.
 
 
 async def run_dashboard_chat_stream(

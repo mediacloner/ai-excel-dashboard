@@ -11,6 +11,10 @@ class ModelConfig(BaseModel):
     temperature: float = 0.1
     format: str | None = None
     stop: list[str] | None = None
+    # Cap on tokens generated per request. None = let Ollama use the model
+    # default (often unlimited within num_ctx). Set this for agents that
+    # could otherwise loop in <think> blocks.
+    num_predict: int | None = None
 
 
 class ModelsConfig(BaseModel):

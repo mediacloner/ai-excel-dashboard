@@ -140,6 +140,37 @@ Order matters. Do these steps IN ORDER:
 
 If you specify `placement`, you can omit `z` entirely. Legacy `z: -1` still works for backward compatibility but `placement: "background"` is preferred — it's harder to get wrong.
 
+**`add_layer` LAYER SCHEMAS — copy these exactly when adding to an existing widget:**
+
+  TEXT (annotations, badges, captions). `color` MUST go inside `style`, NOT top-level:
+  ```
+  {{"layer": {{"type": "text", "content": "Total Returns: 1001",
+              "anchor": "bottom-left", "offset": [10, 10],
+              "placement": "annotation",
+              "style": {{"color": "red", "fontSize": 14, "fontWeight": 600}}}}}}
+  ```
+
+  ICON (lucide name; `color` IS top-level here, opposite of text):
+  ```
+  {{"layer": {{"type": "icon", "name": "trending-up",
+              "anchor": "top-right", "offset": [10, 10], "size": [24, 24],
+              "color": "#22c55e", "placement": "overlay"}}}}
+  ```
+
+  IMAGE (use list_assets first to get asset_id):
+  ```
+  {{"layer": {{"type": "image", "asset_id": "<UUID from list_assets>",
+              "anchor": "fill", "placement": "background"}}}}
+  ```
+
+  SVG (raw markup, only for stylistic backgrounds when no asset matches — see BACKGROUND REQUESTS):
+  ```
+  {{"layer": {{"type": "svg", "markup": "<svg ...>...</svg>",
+              "anchor": "fill", "placement": "background"}}}}
+  ```
+
+  Every layer needs `type`. Without it the renderer can't know what to draw.
+
 **ICONS — `lucide` icons by name, no asset upload required:**
 - Use `build_icon_layer` (existing widget) or include `icons: [...]` in `create_composed_widget`. Pick a name from the lucide library (kebab-case is fine — the renderer normalises): `trending-up`, `trending-down`, `minus`, `arrow-up`, `arrow-down`, `bar-chart`, `line-chart`, `pie-chart`, `activity`, `target`, `check`, `check-circle`, `x`, `x-circle`, `alert-triangle`, `alert-circle`, `info`, `star`, `heart`, `zap`, `flame`, `award`, `trophy`, `dollar-sign`, `percent`, `hash`, `calendar`, `clock`, `users`, `user`, `shopping-cart`, `package`, `truck`, `building`, `home`, `globe`, `eye`, `filter`, `search`, `settings`, `refresh-cw`.
 - Icons accept `color` (CSS), `size` ([w,h] px or single int), `anchor`, `offset`, `placement`. Default placement is `overlay` (on top of the chart).

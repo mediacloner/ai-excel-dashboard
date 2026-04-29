@@ -585,6 +585,29 @@ def _legacy_to_chart_layer(config: dict) -> list[dict]:
     }]
 
 
+def _infer_layer_type(layer: dict) -> str | None:
+    """Infer the `type` field from which payload fields are present.
+
+    Mirrors the renderer's defensive inference so the stored shape stays
+    valid even if the LLM forgets `type`.
+    """
+    if layer.get("type"):
+        return layer["type"]
+    if layer.get("echarts_option"):
+        return "chart"
+    if layer.get("markup"):
+        return "svg"
+    if layer.get("asset_id") or layer.get("src"):
+        return "image"
+    if layer.get("name"):
+        return "icon"
+    if layer.get("kind"):
+        return "shape"
+    if "content" in layer:
+        return "text"
+    return None
+
+
 def _exec_add_layer(args: dict) -> dict:
     """Append a single layer to an existing widget.
 
@@ -603,6 +626,21 @@ def _exec_add_layer(args: dict) -> dict:
     if widget is None:
         return {"error": f"Widget '{widget_id}' not found"}
 
+    # Defensive: infer type if missing. Without this the layer is stored
+    # untyped and the renderer falls through every branch → invisible.
+    if not layer.get("type"):
+        guessed = _infer_layer_type(layer)
+        if guessed is None:
+            return {"error": "layer is missing `type` and no inference is possible. Set type to one of: chart, image, text, svg, shape, icon."}
+        layer["type"] = guessed
+
+    # Defensive: text layers expect `style.color`, but LLMs sometimes
+    # copy the icon pattern and put `color` at top level. Fold it in.
+    if layer["type"] == "text" and layer.get("color") and not (layer.get("style") or {}).get("color"):
+        style = dict(layer.get("style") or {})
+        style["color"] = layer.pop("color")
+        layer["style"] = style
+
     # Validate image layers reference a real asset so we fail loud, not 404.
     if layer.get("type") == "image":
         asset_id = layer.get("asset_id")
@@ -616,6 +654,11 @@ def _exec_add_layer(args: dict) -> dict:
     if layer.get("type") == "icon":
         if not (layer.get("name") or "").strip():
             return {"error": "Icon layer needs a `name` (e.g. 'trending-up', 'star', 'alert-triangle')."}
+
+    # Text layers need content; an empty text layer renders nothing.
+    if layer.get("type") == "text":
+        if not (layer.get("content") or "").strip():
+            return {"error": "Text layer needs `content` (the string to display)."}
 
     # Normalise placement: if the LLM passed an invalid placement, drop it
     # (renderer falls back to z). Don't error — the layer may still be useful.

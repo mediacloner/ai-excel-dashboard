@@ -64,6 +64,20 @@ function effectiveZ(layer: Layer): number {
   return layer.z ?? 0
 }
 
+// Infer a missing `type` field from which payload fields are present.
+// LLMs occasionally emit add_layer layers without `type` — render them
+// anyway by best-effort guess so the user's intent isn't silently dropped.
+function inferType(layer: Layer): Layer["type"] | undefined {
+  if (layer.type) return layer.type
+  if (layer.echarts_option) return "chart"
+  if (layer.markup) return "svg"
+  if (layer.asset_id || layer.src) return "image"
+  if (layer.name) return "icon"
+  if (layer.kind) return "shape"
+  if (layer.content !== undefined) return "text"
+  return undefined
+}
+
 interface Composition {
   canvas?: { background?: string } & Record<string, unknown>
   layers?: Layer[]
@@ -131,7 +145,12 @@ function layerPosition(layer: Layer): CSSProperties {
   return style
 }
 
-function RenderLayer({ layer }: { layer: Layer }) {
+function RenderLayer({ layer: rawLayer }: { layer: Layer }) {
+  // Defensive: infer `type` if the LLM omitted it, and fold `color` into
+  // `style.color` for text layers (LLM sometimes copies the icon-layer
+  // pattern where color is top-level).
+  const inferred = inferType(rawLayer)
+  const layer: Layer = inferred && !rawLayer.type ? { ...rawLayer, type: inferred } : rawLayer
   const pos = layerPosition(layer)
 
   if (layer.type === "chart") {
@@ -166,15 +185,18 @@ function RenderLayer({ layer }: { layer: Layer }) {
   }
 
   if (layer.type === "text") {
+    // Accept color at top-level (LLM copies the icon pattern) OR inside style.
+    const styleColor = (layer.style as CSSProperties | undefined)?.color
+    const resolvedColor = styleColor ?? layer.color ?? "currentColor"
     return (
       <div
         style={{
           ...pos,
-          color: "rgb(229, 229, 229)",
           fontSize: 12,
           whiteSpace: "pre-wrap",
           pointerEvents: "none",
           ...(layer.style as CSSProperties ?? {}),
+          color: resolvedColor,
         }}
       >
         {layer.content ?? ""}

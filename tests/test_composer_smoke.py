@@ -225,6 +225,85 @@ class TestAddLayerValidatesIcon:
         assert "error" in result
         assert "name" in result["error"].lower()
 
+    async def test_add_layer_infers_text_type_from_content(self, monkeypatch):
+        """LLM forgot `type: text` but sent `content` — backend must fold `type` in
+        so the renderer doesn't drop the layer silently."""
+        from app.chat import tools as t
+        from app.models.schemas import Widget, WidgetLayout
+
+        captured: dict = {}
+
+        widget = Widget(
+            id="w1",
+            dashboard_id="d1",
+            widget_type="chart",
+            title="t",
+            config={"layers": [{"id": "chart", "type": "chart", "anchor": "fill"}]},
+            sql_query=None,
+            layout=WidgetLayout(),
+            created_at="now",
+            updated_at="now",
+        )
+        monkeypatch.setattr(t, "get_widget", lambda _id: widget)
+
+        def fake_update_widget_config(widget_id, updates):
+            captured["updates"] = updates
+            new_config = dict(widget.config)
+            new_config["layers"] = updates["layers"]
+            return widget.model_copy(update={"config": new_config})
+
+        monkeypatch.setattr(t, "update_widget_config", fake_update_widget_config)
+
+        events, result = await execute_tool(
+            "add_layer",
+            {
+                "widget_id": "w1",
+                "layer": {
+                    # NO "type" field — exact failure shape we hit in prod.
+                    "content": "Total Returns: 1001",
+                    "anchor": "bottom-left",
+                    "offset": [10, 10],
+                    "placement": "annotation",
+                    "color": "red",  # also at top-level (LLM mistake)
+                    "id": "layer-1",
+                },
+            },
+            dashboard_id="d1",
+            space_id="s1",
+        )
+        assert "widget" in result, result
+        added = [l for l in captured["updates"]["layers"] if l.get("id") == "layer-1"][0]
+        assert added["type"] == "text"
+        # Top-level color was folded into style.color
+        assert added.get("style", {}).get("color") == "red"
+        assert "color" not in added or added.get("color") is None
+
+    async def test_add_layer_text_without_content_errors(self, monkeypatch):
+        from app.chat import tools as t
+        from app.models.schemas import Widget, WidgetLayout
+
+        widget = Widget(
+            id="w1",
+            dashboard_id="d1",
+            widget_type="chart",
+            title="t",
+            config={"layers": []},
+            sql_query=None,
+            layout=WidgetLayout(),
+            created_at="now",
+            updated_at="now",
+        )
+        monkeypatch.setattr(t, "get_widget", lambda _id: widget)
+
+        events, result = await execute_tool(
+            "add_layer",
+            {"widget_id": "w1", "layer": {"type": "text", "anchor": "top-left"}},
+            dashboard_id="d1",
+            space_id="s1",
+        )
+        assert "error" in result
+        assert "content" in result["error"].lower()
+
     async def test_add_layer_strips_invalid_placement(self, monkeypatch):
         from app.chat import tools as t
         from app.models.schemas import Widget, WidgetLayout

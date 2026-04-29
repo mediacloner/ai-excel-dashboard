@@ -16,6 +16,52 @@ def get_read_connection() -> duckdb.DuckDBPyConnection:
     return get_connection(read_only=True)
 
 
+def sync_dataset_aliases() -> int:
+    """Create / refresh DuckDB views that alias dataset_name → real table_name.
+
+    Lets the LLM write `SELECT … FROM customers` and have it resolve to the
+    actual `dataset_4bb65ae2_…` table behind the scenes. Idempotent — runs
+    `CREATE OR REPLACE VIEW`. Skip if the friendly name collides with a real
+    table (the underlying dataset table itself, or a system table).
+
+    Returns count of views created/refreshed.
+    """
+    import re as _re
+
+    conn = get_connection()
+    created = 0
+    try:
+        # Existing real (non-view) tables we must NOT shadow with views.
+        real_tables = {
+            r[0] for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='main' AND table_type='BASE TABLE'"
+            ).fetchall()
+        }
+        rows = conn.execute(
+            "SELECT dataset_name, table_name FROM dataset_metadata"
+        ).fetchall()
+        for dataset_name, table_name in rows:
+            if not dataset_name or not table_name:
+                continue
+            # Sanitize alias to a SQL-safe identifier (lowercase, underscores)
+            alias = _re.sub(r"\W+", "_", dataset_name.strip().lower()).strip("_")
+            if not alias or alias[0].isdigit():
+                continue
+            if alias in real_tables:
+                continue
+            try:
+                conn.execute(f'CREATE OR REPLACE VIEW "{alias}" AS SELECT * FROM "{table_name}"')
+                created += 1
+            except Exception:
+                # A name collision or other DDL error — skip silently, the
+                # LLM will still see the canonical table_name in the prompt.
+                pass
+    finally:
+        conn.close()
+    return created
+
+
 def init_database() -> None:
     conn = get_connection()
     try:

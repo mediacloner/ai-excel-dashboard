@@ -24,6 +24,10 @@ def save_dataset_metadata(
         )
     finally:
         conn.close()
+    # Re-sync friendly-name views so a brand-new dataset is queryable as
+    # `SELECT * FROM <dataset_name>` immediately (no backend restart).
+    from app.database.connection import sync_dataset_aliases
+    sync_dataset_aliases()
 
 
 def get_dataset(dataset_id: str) -> DatasetMetadata | None:

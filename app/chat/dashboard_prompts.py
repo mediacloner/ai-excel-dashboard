@@ -12,9 +12,11 @@ def build_datasets_context(datasets: list[dict]) -> str:
 
     parts = []
     for ds in datasets:
-        lines = [f"### Dataset: {ds.get('dataset_name', ds['table_name'])}"]
-        lines.append(f"**USE THIS TABLE NAME IN YOUR SQL (exact)**: `{ds['table_name']}`")
-        lines.append(f"(The dataset name is a label only. Never use it as a SQL table name.)")
+        ds_name = ds.get('dataset_name', ds['table_name'])
+        lines = [f"### Dataset: {ds_name}"]
+        lines.append(f"SQL table names that work for this dataset (use either):")
+        lines.append(f"  - `{ds_name}`  (friendly alias view — recommended)")
+        lines.append(f"  - `{ds['table_name']}`  (canonical table)")
         lines.append(f"Rows: {ds.get('row_count', '?')}")
         lines.append("Columns:")
 
@@ -261,7 +263,7 @@ When the user names an image (e.g. "starry night sky", "mountain photo", "team l
 ## SQL rules
 
 - DuckDB syntax. SELECT only. No INSERT/UPDATE/DELETE/DROP/DDL.
-- Use the exact `table_name` from "Available Datasets" below (e.g. `dataset_4bb65ae2_...`). There is no table called `customers`.
+- Each dataset is queryable by EITHER its friendly name (`customers`, `orders`, …) OR its canonical UUID-based table (`dataset_4bb65ae2_…`). Both work — friendly is shorter.
 - Limit 100 rows unless asked for more.
 
 ## Widget sizing (dashboard grid is 12 columns wide)

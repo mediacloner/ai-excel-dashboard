@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database.connection import init_database
+from app.database.connection import init_database, sync_dataset_aliases
 from app.routers import assets, chat, dashboards, datasets, review, spaces, upload
 
 logging.basicConfig(
@@ -18,6 +18,9 @@ async def lifespan(app: FastAPI):
     # Startup
     init_database()
     logging.info("Database initialized")
+    n = sync_dataset_aliases()
+    if n:
+        logging.info(f"Created/refreshed {n} dataset alias view(s)")
     yield
     # Shutdown
     logging.info("Shutting down")

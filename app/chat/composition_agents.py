@@ -1,14 +1,13 @@
 """Composition sub-agents.
 
 The top-level dashboard agent is the *composer*. It plans a widget as a stack of
-layers and delegates the generation of each layer to a specialist sub-agent
-(another Qwen3 call with a narrow prompt).
+layers and delegates the generation of each chart layer to a specialist
+sub-agent (another Qwen3 call with a narrow prompt).
 
-- design_chart_layer   → emits a single `chart` layer (ECharts option)
-- design_visual_layer  → emits an `image`/`text`/`svg`/`shape` layer
-
-Each sub-agent returns a plain Layer dict (validated by the frontend renderer,
-not here — we keep validation loose so the LLM has wiggle room).
+- design_chart_layer → emits a single `chart` layer (ECharts option). Called
+  internally from `_exec_create_composed_widget`; not directly invokable by
+  the LLM (visual layers — image/text/icon/shape — are built deterministically
+  in tools.py without an LLM round-trip).
 """
 
 import json
@@ -144,70 +143,3 @@ async def design_chart_layer(
     return layer
 
 
-# ---------------------------------------------------------------------------
-# design_visual_layer
-# ---------------------------------------------------------------------------
-
-_VISUAL_SPECIALIST_PROMPT = """You are a VISUAL LAYER specialist. You design non-chart layers — images, text annotations, SVG decorations, or simple shapes — that sit on top of or around a chart.
-
-A layer is ONE of:
-
-IMAGE layer (for logos, photos, icons):
-{{
-  "id": "<id>", "type": "image",
-  "anchor": "<anchor>", "offset": [x, y], "size": [w, h], "z": 10,
-  "asset_id": "<id from Available Assets>"   // preferred if using an uploaded asset
-  // OR: "src": "/api/assets/file/<id>" or an absolute URL
-}}
-
-TEXT layer (annotations, badges, titles-inside-chart):
-{{
-  "id": "<id>", "type": "text",
-  "anchor": "<anchor>", "offset": [x, y], "z": 5,
-  "content": "<string>",
-  "style": {{ "color": "#fff", "fontSize": 12, "fontWeight": 600 }}
-}}
-
-SVG layer (custom shapes, icons, decorations — inline SVG markup):
-{{
-  "id": "<id>", "type": "svg",
-  "anchor": "<anchor>", "offset": [x, y], "size": [w, h], "z": 5,
-  "markup": "<svg ...>...</svg>"
-}}
-
-SHAPE layer (rect/circle/line with a fill):
-{{
-  "id": "<id>", "type": "shape",
-  "kind": "rect" | "circle" | "line",
-  "anchor": "<anchor>", "offset": [x, y], "size": [w, h], "z": 5,
-  "style": {{ "fill": "#5470c6", "opacity": 0.3 }}
-}}
-
-Anchors: top-left, top-center, top-right, center-left, center, center-right, bottom-left, bottom-center, bottom-right, fill.
-`offset` is in pixels from the anchor point, inward. `size` is [w, h] in px.
-
-Rules:
-- Respond with ONLY the JSON object — one layer. No prose, no markdown fences.
-- Logos go in top-right or top-left corners at 40-60px size. Don't cover chart data.
-- Prefer `asset_id` over `src` when an available asset matches.
-- Keep `z` >= the chart's z so the visual sits on top (chart is typically z=0).
-
-User intent: {intent}
-
-Available Assets (space-scoped images the user has uploaded):
-{assets_summary}
-
-Return ONLY the JSON layer."""
-
-
-async def design_visual_layer(
-    intent: str,
-    assets_summary: str,
-) -> dict[str, Any] | None:
-    prompt = _VISUAL_SPECIALIST_PROMPT.format(intent=intent, assets_summary=assets_summary)
-    layer = await _call_specialist(prompt)
-    if not layer:
-        return None
-    layer.setdefault("id", "visual")
-    layer.setdefault("z", 10)
-    return layer

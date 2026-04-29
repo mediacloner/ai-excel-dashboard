@@ -55,9 +55,10 @@ DASHBOARD_SYSTEM_PROMPT = """You build dashboard widgets. Widgets are STACKS OF 
 <tools>
 <tool>{{"name": "query_data", "arguments": {{"sql": "DuckDB SELECT (use the exact table_name from Available Datasets — not 'customers')"}}}}</tool>
 <tool>{{"name": "list_assets", "arguments": {{}}}}</tool>
-<tool>{{"name": "create_composed_widget", "arguments": {{"title": "...", "chart": {{"intent": "describe the chart (e.g. 'bar chart, distinct color per bar')"}}, "images": [{{"asset_id": "UUID from list_assets", "anchor": "top-right", "offset": [10,10], "size": [40,40]}}], "texts": [{{"content": "...", "anchor": "bottom-left", "offset": [10,10]}}], "width": 6, "height": 2}}}}</tool>
+<tool>{{"name": "create_composed_widget", "arguments": {{"title": "...", "chart": {{"intent": "describe the chart (e.g. 'bar chart, distinct color per bar')"}}, "images": [{{"asset_id": "UUID from list_assets", "anchor": "top-right", "offset": [10,10], "size": [40,40], "placement": "overlay"}}], "icons": [{{"name": "trending-up", "anchor": "top-right", "offset": [10,10], "size": [20,20], "color": "#22c55e", "placement": "overlay"}}], "texts": [{{"content": "...", "anchor": "bottom-left", "offset": [10,10], "placement": "annotation"}}], "width": 6, "height": 2}}}}</tool>
 <tool>{{"name": "add_layer", "arguments": {{"widget_id": "...", "layer": {{...}}}}}}</tool>
-<tool>{{"name": "build_image_layer", "arguments": {{"asset_id": "UUID from list_assets", "anchor": "top-right", "offset": [10,10], "size": [40,40], "z": 10}}}}</tool>
+<tool>{{"name": "build_image_layer", "arguments": {{"asset_id": "UUID from list_assets", "anchor": "top-right", "offset": [10,10], "size": [40,40], "placement": "overlay"}}}}</tool>
+<tool>{{"name": "build_icon_layer", "arguments": {{"name": "trending-up", "anchor": "top-right", "offset": [10,10], "size": [20,20], "color": "#22c55e", "placement": "overlay"}}}}</tool>
 <tool>{{"name": "create_chart_widget", "arguments": {{"title": "...", "echarts_option": {{...}}, "sql_query": "...", "width": 6, "height": 2}}}}</tool>
 <tool>{{"name": "create_kpi_widget", "arguments": {{"title": "...", "value": "...", "subtitle": "...", "trend": null, "sql_query": "...", "width": 3, "height": 1}}}}</tool>
 <tool>{{"name": "create_table_widget", "arguments": {{"title": "...", "columns": [...], "data": [...], "sql_query": "...", "width": 6, "height": 3}}}}</tool>
@@ -108,15 +109,27 @@ Tool-call format (exact, one call per block):
 Order matters. Do these steps IN ORDER:
 
   **Step 1 — check uploads first.** Always call `list_assets` before deciding. Fuzzy-match the user's request against asset `filename` + `tags` using the rules in "ASSET MATCHING" below. If ANY asset matches — even loosely — use it. This is the default path, because if the user uploaded something, they want it used.
-    → build_image_layer with `anchor: "fill"`, **`z: -1`** (critical: negative so it sits UNDER the chart; `z: 0` ties with the chart and renders ON TOP instead). Then add_layer.
+    → build_image_layer with `anchor: "fill"`, **`placement: "background"`**. Then add_layer.
     If the user says phrases like "I uploaded", "my image", "the one I added", "from my assets" — this path is mandatory; do not synthesize.
 
-  **Step 2 — synthesize only if Step 1 matched nothing AND the request is stylistic.** If list_assets has zero fuzzy-matching assets AND the request describes an abstract style/mood (e.g. "starry night sky", "sunset gradient", "confetti", "paper texture", "neon glow", "northern lights"), generate an inline SVG layer instead. Call `add_layer` with a `type: "svg"` layer, `anchor: "fill"`, **`z: -1`**, and `markup` set to a full-bleed SVG. The root `<svg>` MUST include `width="100%" height="100%" preserveAspectRatio="xMidYMid slice"` (otherwise it renders at intrinsic size). Use `<defs><linearGradient>/<radialGradient></defs>` + `<rect width="100%" height="100%">` + scattered `<circle>` elements. Keep markup under ~3 KB and well-formed.
+  **Step 2 — synthesize only if Step 1 matched nothing AND the request is stylistic.** If list_assets has zero fuzzy-matching assets AND the request describes an abstract style/mood (e.g. "starry night sky", "sunset gradient", "confetti", "paper texture", "neon glow", "northern lights"), generate an inline SVG layer instead. Call `add_layer` with a `type: "svg"` layer, `anchor: "fill"`, **`placement: "background"`**, and `markup` set to a full-bleed SVG. The root `<svg>` MUST include `width="100%" height="100%" preserveAspectRatio="xMidYMid slice"` (otherwise it renders at intrinsic size). Use `<defs><linearGradient>/<radialGradient></defs>` + `<rect width="100%" height="100%">` + scattered `<circle>` elements. Keep markup under ~3 KB and well-formed.
     Example starry-night skeleton: `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 400 200" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="sky" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#0b1a3a"/><stop offset="100%" stop-color="#000014"/></linearGradient></defs><rect width="400" height="200" fill="url(#sky)"/><circle cx="40" cy="30" r="1.2" fill="#fff" opacity="0.9"/><circle cx="120" cy="70" r="0.8" fill="#fff" opacity="0.7"/><circle cx="260" cy="40" r="1.5" fill="#fff" opacity="0.95"/><circle cx="330" cy="120" r="1" fill="#fff" opacity="0.8"/></svg>`
 
   **Step 3 — if no asset AND not stylistic** (e.g. user asked for "our team photo" with no matching upload): reply ONE sentence asking them to upload.
 
-Critical: for ALL background layers use `z: -1`. The chart layer defaults to `z: 0`, and equal-z layers stack in insertion order (later = on top) — so `z: 0` on a background added after the chart will appear OVER the chart, which is wrong.
+**LAYER PLACEMENT — use `placement` instead of guessing `z`:**
+- `"background"` — sits BEHIND the chart (use for full-bleed images / svg backgrounds; equivalent to z=-10).
+- `"chart"` — same plane as the chart layer (z=0). Default for the chart itself.
+- `"overlay"` — ON TOP of the chart; use for logos, icons, decorations (z=10). DEFAULT for images/icons.
+- `"annotation"` — above overlays; use for callouts, badges, labels (z=20).
+- `"foreground"` — topmost; use sparingly (z=30).
+
+If you specify `placement`, you can omit `z` entirely. Legacy `z: -1` still works for backward compatibility but `placement: "background"` is preferred — it's harder to get wrong.
+
+**ICONS — `lucide` icons by name, no asset upload required:**
+- Use `build_icon_layer` (existing widget) or include `icons: [...]` in `create_composed_widget`. Pick a name from the lucide library (kebab-case is fine — the renderer normalises): `trending-up`, `trending-down`, `minus`, `arrow-up`, `arrow-down`, `bar-chart`, `line-chart`, `pie-chart`, `activity`, `target`, `check`, `check-circle`, `x`, `x-circle`, `alert-triangle`, `alert-circle`, `info`, `star`, `heart`, `zap`, `flame`, `award`, `trophy`, `dollar-sign`, `percent`, `hash`, `calendar`, `clock`, `users`, `user`, `shopping-cart`, `package`, `truck`, `building`, `home`, `globe`, `eye`, `filter`, `search`, `settings`, `refresh-cw`.
+- Icons accept `color` (CSS), `size` ([w,h] px or single int), `anchor`, `offset`, `placement`. Default placement is `overlay` (on top of the chart).
+- Prefer icons over generating SVG markup whenever a lucide name fits — they're crisp, themable, and don't require asset uploads.
 
 **ASSET MATCHING — fuzzy / similarity-based** (be helpful, not pedantic — applies only to path B):
 

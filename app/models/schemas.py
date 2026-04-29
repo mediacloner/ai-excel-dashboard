@@ -171,6 +171,13 @@ Anchor = Literal[
     "fill",
 ]
 
+# Semantic placement in the layer stack. Replaces ad-hoc numeric z for the
+# common case of "behind / in / above the chart". The renderer maps this to
+# a numeric z internally (background=-10, chart=0, overlay=10, annotation=20,
+# foreground=30). Numeric `z` still works as a fallback so legacy widgets
+# (e.g. `z: -1` backgrounds) keep rendering correctly.
+Placement = Literal["background", "chart", "overlay", "annotation", "foreground"]
+
 
 class Layer(BaseModel):
     """A single compositional layer inside a widget.
@@ -180,11 +187,12 @@ class Layer(BaseModel):
     `anchor: "fill"` stretches to the whole body (offset/size ignored).
     """
     id: str
-    type: Literal["chart", "image", "text", "svg", "shape"]
+    type: Literal["chart", "image", "text", "svg", "shape", "icon"]
     anchor: Anchor = "top-left"
     offset: list[int] = Field(default_factory=lambda: [0, 0])
     size: list[int] | None = None  # [w, h] in px; null = auto
-    z: int = 0
+    placement: Placement | None = None  # preferred — semantic stack position
+    z: int = 0                          # legacy / escape hatch; ignored if placement set
     # type-specific (all optional; validated per type by the frontend)
     echarts_option: dict[str, Any] | None = None  # type=chart
     src: str | None = None                        # type=image (URL or /assets/...)
@@ -192,6 +200,8 @@ class Layer(BaseModel):
     content: str | None = None                    # type=text
     markup: str | None = None                     # type=svg (inline SVG string)
     kind: Literal["rect", "circle", "line"] | None = None  # type=shape
+    name: str | None = None                       # type=icon (lucide name, e.g. "trending-up")
+    color: str | None = None                      # type=icon (CSS color; defaults to currentColor)
     style: dict[str, Any] | None = None           # css-ish: color, fontSize, opacity, ...
 
 

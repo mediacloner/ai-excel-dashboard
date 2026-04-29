@@ -9,7 +9,7 @@ from typing import Any
 from json_repair import repair_json
 
 from app.chat.agent import execute_user_query
-from app.chat.composition_agents import design_chart_layer, design_visual_layer
+from app.chat.composition_agents import design_chart_layer
 from app.chat.streaming import (
     sse_tool_call_result,
     sse_tool_call_start,
@@ -91,19 +91,11 @@ async def execute_tool(
         elif tool_name == "list_assets":
             result = _exec_list_assets(tool_args, space_id)
 
-        elif tool_name == "design_chart_layer":
-            result = await _exec_design_chart_layer(tool_args)
-
-        elif tool_name == "design_visual_layer":
-            result = await _exec_design_visual_layer(tool_args, space_id)
-
         elif tool_name == "build_image_layer":
             result = _exec_build_image_layer(tool_args)
 
-        elif tool_name == "create_composition":
-            result = _exec_create_composition(tool_args, dashboard_id)
-            if "widget" in result:
-                events.append(sse_widget_create(result["widget"]))
+        elif tool_name == "build_icon_layer":
+            result = _exec_build_icon_layer(tool_args)
 
         elif tool_name == "create_composed_widget":
             result = await _exec_create_composed_widget(tool_args, dashboard_id)
@@ -326,39 +318,6 @@ def _exec_list_assets(_args: dict, space_id: str) -> dict:
     }
 
 
-async def _exec_design_chart_layer(args: dict) -> dict:
-    intent = args.get("intent", "")
-    data_summary = args.get("data_summary", "")
-    if not intent:
-        return {"error": "intent is required"}
-    layer = await design_chart_layer(intent, data_summary)
-    if layer is None:
-        return {"error": "Chart specialist could not produce a valid layer"}
-    return {"layer": layer}
-
-
-async def _exec_design_visual_layer(args: dict, space_id: str) -> dict:
-    intent = args.get("intent", "")
-    if not intent:
-        return {"error": "intent is required"}
-
-    # Build an assets summary the specialist can see
-    assets = list_space_assets(space_id)
-    if assets:
-        lines = [
-            f'- asset_id="{a.id}"  filename="{a.filename}"  tags={a.tags}'
-            for a in assets
-        ]
-        assets_summary = "\n".join(lines)
-    else:
-        assets_summary = "(none — the user has not uploaded any assets yet)"
-
-    layer = await design_visual_layer(intent, assets_summary)
-    if layer is None:
-        return {"error": "Visual specialist could not produce a valid layer"}
-    return {"layer": layer}
-
-
 async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     """Declarative, single-call composer.
 
@@ -368,8 +327,9 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     args:
       title: str
       chart: {"intent": str, "data_summary": str|dict} | None
-      images: [{"asset_id": str, "anchor": str, "offset": [x,y], "size": [w,h], "z"?: int, "id"?: str}]
-      texts: [{"content": str, "anchor": str, "offset": [x,y], "z"?: int, "style"?: {...}}]
+      images: [{"asset_id": str, "anchor": str, "offset": [x,y], "size": [w,h], "placement"?: str, "z"?: int, "id"?: str}]
+      texts:  [{"content": str, "anchor": str, "offset": [x,y], "placement"?: str, "z"?: int, "style"?: {...}}]
+      icons:  [{"name": str, "anchor": str, "offset": [x,y], "size": [w,h], "color"?: str, "placement"?: str, "z"?: int, "id"?: str}]
       sql_query: str
       width: int, height: int
       canvas: {...}
@@ -378,6 +338,7 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     chart_spec = args.get("chart")
     images = args.get("images", []) or []
     texts = args.get("texts", []) or []
+    icons = args.get("icons", []) or []
     sql_query = args.get("sql_query", "")
     width = args.get("width", 6)
     height = args.get("height", 2)
@@ -422,15 +383,16 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
         anchor = img.get("anchor", "top-right")
         if anchor not in _VALID_ANCHORS:
             return {"error": f"images[{i}] invalid anchor '{anchor}'"}
-        layers.append({
+        layer = {
             "id": img.get("id", f"image-{i}"),
             "type": "image",
             "anchor": anchor,
             "offset": img.get("offset", [10, 10]),
             "size": img.get("size", [40, 40]),
-            "z": img.get("z", 10 + i),
             "asset_id": asset_id,
-        })
+        }
+        _apply_placement(layer, img, default_placement="overlay", default_z=10 + i)
+        layers.append(layer)
 
     # Text layers — simple deterministic construction
     for i, t in enumerate(texts):
@@ -440,18 +402,42 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
         anchor = t.get("anchor", "top-left")
         if anchor not in _VALID_ANCHORS:
             return {"error": f"texts[{i}] invalid anchor '{anchor}'"}
-        layers.append({
+        layer = {
             "id": t.get("id", f"text-{i}"),
             "type": "text",
             "anchor": anchor,
             "offset": t.get("offset", [10, 10]),
-            "z": t.get("z", 20 + i),
             "content": content,
             "style": t.get("style", {}),
-        })
+        }
+        _apply_placement(layer, t, default_placement="annotation", default_z=20 + i)
+        layers.append(layer)
+
+    # Icon layers — lucide icon by name, no asset upload required
+    for i, ic in enumerate(icons):
+        name = (ic.get("name") or "").strip()
+        if not name:
+            return {"error": f"icons[{i}] missing name (e.g. 'trending-up', 'star')"}
+        anchor = ic.get("anchor", "top-right")
+        if anchor not in _VALID_ANCHORS:
+            return {"error": f"icons[{i}] invalid anchor '{anchor}'"}
+        size = ic.get("size", [20, 20])
+        if isinstance(size, int):
+            size = [size, size]
+        layer = {
+            "id": ic.get("id", f"icon-{i}"),
+            "type": "icon",
+            "anchor": anchor,
+            "offset": ic.get("offset", [10, 10]),
+            "size": size,
+            "name": name,
+            "color": ic.get("color"),
+        }
+        _apply_placement(layer, ic, default_placement="overlay", default_z=15 + i)
+        layers.append(layer)
 
     if not layers:
-        return {"error": "No layers produced — provide at least a chart or one image/text."}
+        return {"error": "No layers produced — provide at least a chart or one image/text/icon."}
 
     layout = auto_place_widget(dashboard_id, width=width, height=height)
     widget = create_widget(
@@ -470,38 +456,43 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     }
 
 
-def _exec_create_composition(args: dict, dashboard_id: str) -> dict:
-    """Create a widget from an ordered list of layers."""
-    title = args.get("title", "Widget")
-    layers = args.get("layers", [])
-    canvas = args.get("canvas", {})
-    sql_query = args.get("sql_query", "")
-    width = args.get("width", 6)
-    height = args.get("height", 2)
-
-    if not isinstance(layers, list) or not layers:
-        return {"error": "layers must be a non-empty list"}
-
-    layout = auto_place_widget(dashboard_id, width=width, height=height)
-
-    widget = create_widget(
-        dashboard_id=dashboard_id,
-        widget_type="chart",  # Composition widgets reuse the chart slot on the frontend
-        title=title,
-        config={"canvas": canvas, "layers": layers},
-        layout=layout,
-        sql_query=sql_query,
-    )
-
-    return {"widget_id": widget.id, "status": "created", "widget": widget.model_dump()}
-
-
 _VALID_ANCHORS = {
     "top-left", "top-center", "top-right",
     "center-left", "center", "center-right",
     "bottom-left", "bottom-center", "bottom-right",
     "fill",
 }
+
+_VALID_PLACEMENTS = {"background", "chart", "overlay", "annotation", "foreground"}
+
+
+def _apply_placement(
+    layer: dict,
+    src: dict,
+    *,
+    default_placement: str,
+    default_z: int,
+) -> None:
+    """Resolve placement + z onto a layer dict.
+
+    Precedence: explicit `placement` > explicit `z` > default placement.
+    The renderer maps placement→z, so once placement is set we don't need z;
+    but we still set z = default_z as a fallback for any consumer reading it.
+    """
+    placement = src.get("placement")
+    if placement:
+        if placement not in _VALID_PLACEMENTS:
+            placement = default_placement
+        layer["placement"] = placement
+        # leave z unset / default — placement wins in renderer
+        layer["z"] = src.get("z", default_z)
+        return
+    if "z" in src:
+        layer["z"] = src["z"]
+        return
+    # Neither given — use default placement (semantic, future-proof)
+    layer["placement"] = default_placement
+    layer["z"] = default_z
 
 
 def _exec_build_image_layer(args: dict) -> dict:
@@ -536,8 +527,12 @@ def _exec_build_image_layer(args: dict) -> dict:
 
     offset = args.get("offset", [10, 10])
     size = args.get("size", [40, 40])
-    z = args.get("z", 10)
     layer_id = args.get("id", "logo")
+
+    # Default placement: "background" if anchor is fill (i.e. cover-the-widget),
+    # otherwise "overlay" (logos in corners).
+    default_placement = "background" if anchor == "fill" else "overlay"
+    default_z = -1 if anchor == "fill" else 10
 
     layer = {
         "id": layer_id,
@@ -545,9 +540,37 @@ def _exec_build_image_layer(args: dict) -> dict:
         "anchor": anchor,
         "offset": offset,
         "size": size,
-        "z": z,
         "asset_id": asset_id,
     }
+    _apply_placement(layer, args, default_placement=default_placement, default_z=default_z)
+    return {"layer": layer}
+
+
+def _exec_build_icon_layer(args: dict) -> dict:
+    """Deterministic icon-layer builder. The LLM picks an icon by name (lucide
+    PascalCase or kebab-case — the renderer normalises). No assets, no markup."""
+    name = (args.get("name") or "").strip()
+    if not name:
+        return {"error": "name is required (e.g. 'trending-up', 'star', 'alert-triangle')"}
+
+    anchor = args.get("anchor", "top-right")
+    if anchor not in _VALID_ANCHORS:
+        return {"error": f"anchor must be one of {sorted(_VALID_ANCHORS)}"}
+
+    size = args.get("size", [20, 20])
+    if isinstance(size, int):
+        size = [size, size]
+
+    layer = {
+        "id": args.get("id", f"icon-{name}"),
+        "type": "icon",
+        "anchor": anchor,
+        "offset": args.get("offset", [10, 10]),
+        "size": size,
+        "name": name,
+        "color": args.get("color"),
+    }
+    _apply_placement(layer, args, default_placement="overlay", default_z=15)
     return {"layer": layer}
 
 
@@ -588,6 +611,17 @@ def _exec_add_layer(args: dict) -> dict:
             return {"error": f"Image layer references unknown asset_id '{asset_id}'. Call list_assets and use one of the ids verbatim."}
         if not asset_id and not src:
             return {"error": "Image layer needs asset_id (preferred) or src."}
+
+    # Icon layers need a name; the renderer falls back to HelpCircle but loud is better.
+    if layer.get("type") == "icon":
+        if not (layer.get("name") or "").strip():
+            return {"error": "Icon layer needs a `name` (e.g. 'trending-up', 'star', 'alert-triangle')."}
+
+    # Normalise placement: if the LLM passed an invalid placement, drop it
+    # (renderer falls back to z). Don't error — the layer may still be useful.
+    placement = layer.get("placement")
+    if placement and placement not in _VALID_PLACEMENTS:
+        layer.pop("placement", None)
 
     existing_layers = widget.config.get("layers") or []
     if not existing_layers:

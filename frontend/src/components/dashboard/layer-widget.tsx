@@ -1,5 +1,6 @@
-import { type CSSProperties, useMemo } from "react"
+import { type CSSProperties, type ComponentType, useMemo } from "react"
 import ReactECharts from "echarts-for-react"
+import * as LucideIcons from "lucide-react"
 
 type Anchor =
   | "top-left" | "top-center" | "top-right"
@@ -7,12 +8,25 @@ type Anchor =
   | "bottom-left" | "bottom-center" | "bottom-right"
   | "fill"
 
+type Placement = "background" | "chart" | "overlay" | "annotation" | "foreground"
+
+// Maps semantic placement to a numeric z used for sorting. Picked so
+// background sits behind the chart (z=0) and overlays/annotations on top.
+const PLACEMENT_Z: Record<Placement, number> = {
+  background: -10,
+  chart: 0,
+  overlay: 10,
+  annotation: 20,
+  foreground: 30,
+}
+
 interface Layer {
   id: string
-  type: "chart" | "image" | "text" | "svg" | "shape"
+  type: "chart" | "image" | "text" | "svg" | "shape" | "icon"
   anchor?: Anchor
   offset?: [number, number]
   size?: [number, number] | null
+  placement?: Placement
   z?: number
   echarts_option?: Record<string, unknown>
   src?: string
@@ -20,7 +34,34 @@ interface Layer {
   content?: string
   markup?: string
   kind?: "rect" | "circle" | "line"
+  name?: string  // icon: lucide name
+  color?: string // icon: CSS color
   style?: Record<string, string | number>
+}
+
+// Convert a kebab/space/snake icon name to PascalCase for lucide lookup.
+// "trending-up" → "TrendingUp", "alert_circle" → "AlertCircle"
+function toPascal(name: string): string {
+  return name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((s) => s[0].toUpperCase() + s.slice(1).toLowerCase())
+    .join("")
+}
+
+type IconComponent = ComponentType<{ size?: number; color?: string; strokeWidth?: number }>
+
+function lookupIcon(name: string | undefined): IconComponent {
+  if (!name) return (LucideIcons as Record<string, unknown>).HelpCircle as IconComponent
+  const pascal = toPascal(name)
+  const found = (LucideIcons as Record<string, unknown>)[pascal] as IconComponent | undefined
+  return found ?? ((LucideIcons as Record<string, unknown>).HelpCircle as IconComponent)
+}
+
+// Effective z used for sort order: placement wins, fall back to numeric z (legacy).
+function effectiveZ(layer: Layer): number {
+  if (layer.placement && layer.placement in PLACEMENT_Z) return PLACEMENT_Z[layer.placement]
+  return layer.z ?? 0
 }
 
 interface Composition {
@@ -53,7 +94,7 @@ function layerPosition(layer: Layer): CSSProperties {
   const anchor = layer.anchor ?? "top-left"
   const [ox, oy] = layer.offset ?? [0, 0]
   const size = layer.size ?? null
-  const style: CSSProperties = { position: "absolute", zIndex: layer.z ?? 0 }
+  const style: CSSProperties = { position: "absolute", zIndex: effectiveZ(layer) }
 
   if (anchor === "fill") {
     style.inset = 0
@@ -150,6 +191,16 @@ function RenderLayer({ layer }: { layer: Layer }) {
     )
   }
 
+  if (layer.type === "icon") {
+    const Icon = lookupIcon(layer.name)
+    const px = layer.size?.[0] ?? 20
+    return (
+      <div style={{ ...pos, pointerEvents: "none", lineHeight: 0 }}>
+        <Icon size={px} color={layer.color ?? "currentColor"} strokeWidth={2} />
+      </div>
+    )
+  }
+
   if (layer.type === "shape") {
     const kind = layer.kind ?? "rect"
     const shapeStyle: CSSProperties = {
@@ -176,7 +227,7 @@ function RenderLayer({ layer }: { layer: Layer }) {
 export function LayerWidget({ config }: LayerWidgetProps) {
   const comp = useMemo(() => normalize(config), [config])
   const bg = comp.canvas?.background
-  const sorted = [...(comp.layers ?? [])].sort((a, b) => (a.z ?? 0) - (b.z ?? 0))
+  const sorted = [...(comp.layers ?? [])].sort((a, b) => effectiveZ(a) - effectiveZ(b))
 
   return (
     <div
@@ -209,7 +260,7 @@ export function LayerOverlay({ config }: LayerOverlayProps) {
   // Skip chart layers here — those only make sense inside LayerWidget
   const overlays = layers
     .filter((l) => l.type !== "chart")
-    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0))
+    .sort((a, b) => effectiveZ(a) - effectiveZ(b))
   return (
     <>
       {overlays.map((layer) => (

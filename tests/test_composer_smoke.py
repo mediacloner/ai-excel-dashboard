@@ -238,6 +238,79 @@ class TestComposedWidgetWithIcons:
         assert icon["placement"] == "annotation"
 
 
+class TestDuplicateTitleGuard:
+    """If a widget with the same title already exists, the LLM should be
+    routed to update_widget — not create a duplicate (and then have its
+    follow-up add_layer calls hit a random other widget)."""
+
+    async def test_duplicate_title_errors_with_existing_id(self, monkeypatch):
+        from app.chat import tools as t
+        from app.models.schemas import Dashboard, Widget, WidgetLayout
+
+        existing = Widget(
+            id="existing-uuid-1",
+            dashboard_id="d1",
+            widget_type="chart",
+            title="Top 10 Customers by Spend",
+            config={"layers": []},
+            sql_query=None,
+            layout=WidgetLayout(),
+            created_at="now",
+            updated_at="now",
+        )
+        dash = Dashboard(
+            id="d1", space_id="s1", name="d", created_at="now", updated_at="now",
+            widgets=[existing],
+        )
+        monkeypatch.setattr("app.database.dashboards.get_dashboard", lambda _id: dash)
+
+        events, result = await execute_tool(
+            "create_composed_widget",
+            {
+                "title": "Top 10 Customers by Spend",  # same title as existing
+                "chart": {"intent": "horizontal bar"},
+            },
+            dashboard_id="d1",
+            space_id="s1",
+        )
+        assert "error" in result, result
+        assert "already exists" in result["error"]
+        assert result.get("existing_widget_id") == "existing-uuid-1"
+        # Crucially: NO widget was created (so subsequent add_layer can't
+        # silently latch onto the wrong one).
+        assert "widget" not in result
+
+    async def test_case_insensitive_title_match(self, monkeypatch):
+        from app.chat import tools as t
+        from app.models.schemas import Dashboard, Widget, WidgetLayout
+
+        existing = Widget(
+            id="existing-uuid-2",
+            dashboard_id="d1",
+            widget_type="chart",
+            title="Returns Over Time",
+            config={"layers": []},
+            sql_query=None,
+            layout=WidgetLayout(),
+            created_at="now",
+            updated_at="now",
+        )
+        dash = Dashboard(
+            id="d1", space_id="s1", name="d", created_at="now", updated_at="now",
+            widgets=[existing],
+        )
+        monkeypatch.setattr("app.database.dashboards.get_dashboard", lambda _id: dash)
+
+        events, result = await execute_tool(
+            "create_composed_widget",
+            {"title": "RETURNS over TIME", "chart": {"intent": "line"}},  # different case
+            dashboard_id="d1",
+            space_id="s1",
+        )
+        assert "error" in result
+        assert result.get("existing_widget_id") == "existing-uuid-2"
+
+
 class TestAddLayerValidatesIcon:
     async def test_add_layer_rejects_icon_without_name(self, monkeypatch):
         from app.chat import tools as t

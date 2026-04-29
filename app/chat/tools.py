@@ -323,6 +323,21 @@ def _exec_list_assets(_args: dict, space_id: str) -> dict:
     }
 
 
+def _find_widget_by_title(dashboard_id: str, title: str) -> str | None:
+    """Return the id of an existing widget with this title (case-insensitive)
+    on this dashboard, or None. Used to short-circuit duplicate creates."""
+    from app.database.dashboards import get_dashboard
+
+    dash = get_dashboard(dashboard_id)
+    if dash is None:
+        return None
+    target = title.strip().lower()
+    for w in dash.widgets:
+        if (w.title or "").strip().lower() == target:
+            return w.id
+    return None
+
+
 async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     """Declarative, single-call composer.
 
@@ -348,6 +363,22 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
     width = args.get("width", 6)
     height = args.get("height", 2)
     canvas = args.get("canvas", {})
+
+    # Duplicate-title guard. The LLM frequently re-creates a widget the user
+    # already has when given a re-phrased prompt — that left orphan widgets
+    # while subsequent add_layer calls hit RANDOM other widgets. Force the
+    # LLM down the update path explicitly.
+    existing_id = _find_widget_by_title(dashboard_id, title)
+    if existing_id:
+        return {
+            "error": (
+                f"A widget titled '{title}' already exists on this dashboard "
+                f"(widget_id='{existing_id}'). Use `update_widget` with that "
+                f"widget_id to modify it. Do NOT call add_layer after this — "
+                f"no widget was created."
+            ),
+            "existing_widget_id": existing_id,
+        }
 
     layers: list[dict] = []
 

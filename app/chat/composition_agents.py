@@ -72,7 +72,9 @@ async def _call_specialist(prompt: str) -> dict | None:
 # design_chart_layer
 # ---------------------------------------------------------------------------
 
-_CHART_SPECIALIST_PROMPT = """You are a CHART LAYER specialist. Your only job is to emit ONE chart layer as JSON.
+_CHART_SPECIALIST_PROMPT = """/no_think
+
+You are a CHART LAYER specialist. Your only job is to emit ONE chart layer as JSON.
 
 A chart layer looks like:
 {{
@@ -87,6 +89,26 @@ Rules:
 - Respond with ONLY the JSON object. No prose, no markdown fences.
 - Use `anchor: "fill"` unless told otherwise — the chart fills the widget body.
 - The `echarts_option` MUST be a complete valid ECharts option (tooltip, xAxis/yAxis or series.data as appropriate). Do not fabricate data — use the provided rows.
+
+CHART-DATA-ANCHORED DECORATIONS — when the intent mentions a decoration on a specific bar/point ("crown on #1", "icon on max", "flag on March"), add `markPoint` to the relevant `series[i]`:
+  ```
+  "markPoint": {{
+    "label": {{"show": false}},
+    "data": [
+      {{"type": "max", "symbol": "@crown", "symbolSize": [32,32], "itemStyle": {{"color": "#fbbf24"}}}}
+    ]
+  }}
+  ```
+- Use `@<name>` symbol aliases — the backend resolves them to ECharts path strings. ANY lucide name works: `@crown`, `@trophy`, `@bike`, `@star`, `@flame`, `@heart`, `@gem`, `@medal`, `@award`, `@sparkles`, `@rocket`, `@target`, `@diamond`, `@thumbs-up`, `@bell`, `@flag`, `@gift`, `@coffee`, `@bolt`, `@lock`, `@key`, `@map-pin`, etc. (kebab-case)
+- Pin to a value with `{{"type": "max"}}` / `{{"type": "min"}}` (auto), or `{{"coord": [<value>, "<category-name>"]}}` for horizontal bar (yAxis = category), `[<category-name>, <value>]` for vertical bar.
+- Multiple decorations? One `markPoint` per series, with multiple entries in `data`, each carrying its own `symbol` / `symbolSize` / `itemStyle`. Example: crown on max + bike on Nancy:
+  ```
+  "data": [
+    {{"type": "max", "symbol": "@crown", "symbolSize": [32,32], "itemStyle": {{"color": "#fbbf24"}}}},
+    {{"coord": [28682.15, "Nancy Robinson"], "symbol": "@bike", "symbolSize": [28,28], "itemStyle": {{"color": "#3b82f6"}}}}
+  ]
+  ```
+- ALWAYS set `markPoint.label.show: false` so the symbol isn't overlaid with text.
 - BAR CHART SHAPE — pick by counting categorical axes in the intent:
   * CASE A (ONE categorical axis, e.g. "returns by status"): EXACTLY ONE series with N data items; category labels on `xAxis.data`. For per-bar colors wrap each value as `{{"value": <N>, "itemStyle": {{"color": "<hex>"}}}}`. DO NOT split into one-series-per-category — that renders as grouped bars and is WRONG here.
   * CASE B (TWO categorical axes, e.g. "orders per month split by status"): ONE series PER inner category (e.g. one series per status), each with M data items (one per month). For a STACKED chart, set `stack: "<name>"` on EVERY series (same name stacks them). Without `stack`, bars render grouped side-by-side.

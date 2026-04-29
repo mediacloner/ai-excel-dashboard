@@ -23,11 +23,23 @@ trap cleanup EXIT INT TERM
 
 # --- Check prerequisites ---
 
-# Python venv
-if [ ! -f "$ROOT/.venv/bin/python" ]; then
+# Python venv — self-healing. Tries the stdlib `venv` first; falls back to
+# `virtualenv` when `python3.14-venv` (or equivalent) isn't installed system-wide,
+# which is the case on this machine.
+if [ ! -f "$ROOT/.venv/bin/python" ] || ! "$ROOT/.venv/bin/python" -c "import pip" >/dev/null 2>&1; then
     echo -e "${CYAN}Creating Python venv...${NC}"
-    python3 -m venv "$ROOT/.venv"
-    "$ROOT/.venv/bin/pip" install -e "$ROOT" --quiet
+    rm -rf "$ROOT/.venv"
+    if python3 -m venv "$ROOT/.venv" 2>/dev/null; then
+        :  # stdlib venv worked
+    else
+        echo -e "${CYAN}stdlib venv unavailable (python3-venv missing); falling back to virtualenv...${NC}"
+        if ! python3 -c "import virtualenv" >/dev/null 2>&1; then
+            pip3 install --quiet --user --break-system-packages virtualenv
+        fi
+        python3 -m virtualenv "$ROOT/.venv" >/dev/null
+    fi
+    echo -e "${CYAN}Installing Python dependencies...${NC}"
+    "$ROOT/.venv/bin/pip" install --quiet -e "$ROOT[dev]"
 fi
 
 # Node.js (via nvm)

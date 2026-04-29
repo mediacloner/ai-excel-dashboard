@@ -213,7 +213,58 @@ async def run_dashboard_chat_stream(
                                 text_parts.append(clean)
                             text_buffer = ""
 
-            # Flush remaining text — check for raw tool call first
+            # Flush remaining content. There are THREE places content can be
+            # stranded when a stream ends:
+            #   - text_buffer  — text outside <tool_call> tags
+            #   - tool_buffer  — partial tool call that never reached </tool_call>
+            #     (was silently discarded before — caused agent to "hang" with
+            #     no observable output when Qwen3 truncates mid-call)
+            # We try tool_buffer first because it's the more useful content.
+            recovered_call = None
+            if in_tool_call and tool_buffer:
+                # Drop the leading <tool_call> tag, look for a balanced JSON
+                # object, then try strict parse → repair_json fallback.
+                inner = tool_buffer.replace("<tool_call>", "", 1).strip()
+                # If close tag is partially present, drop it
+                inner = re.sub(r"</tool_call>?\s*$", "", inner).rstrip()
+                m = re.search(r"\{[\s\S]*", inner, re.DOTALL)
+                if m:
+                    chunk = m.group(0)
+                    try:
+                        recovered_call = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        try:
+                            r = repair_json(chunk, return_objects=True)
+                            if isinstance(r, dict):
+                                recovered_call = r
+                        except Exception:
+                            pass
+                if recovered_call and "name" in recovered_call:
+                    logger.info(f"recovered truncated tool_call: {recovered_call.get('name')}")
+                    tool_name = recovered_call.get("name", "")
+                    tool_args = recovered_call.get("arguments", {})
+                    tool_calls_found.append({"name": tool_name, "args": tool_args})
+                    events, result = await execute_tool(
+                        tool_name=tool_name, tool_args=tool_args,
+                        dashboard_id=dashboard_id, space_id=space_id,
+                    )
+                    for event in events:
+                        yield event
+                    tool_result_str = format_tool_result_for_llm(tool_name, result)
+                    messages.append({"role": "assistant", "content": full_response})
+                    messages.append({"role": "user", "content": f"<tool_response>\n{tool_result_str}\n</tool_response>"})
+                else:
+                    # Couldn't recover. Surface the failure to the user so they
+                    # know the agent didn't silently no-op.
+                    logger.warning(f"truncated tool_call could not be recovered ({len(tool_buffer)} chars)")
+                    yield sse_error(
+                        "The model produced a truncated tool call (response cut off "
+                        "before </tool_call>). Try the request again with a simpler "
+                        "phrasing, or break it into smaller steps.",
+                        recoverable=True,
+                    )
+                tool_buffer = ""
+
             if text_buffer:
                 raw = text_buffer.strip()
                 is_tool = False

@@ -20,7 +20,7 @@ models:
     # Combined with `/no_think` in the system prompt this is more than
     # enough for any single tool call — we observed runaways at 4000+
     # tokens stalling the agent on the 2nd/3rd widget.
-    num_predict: 2048
+    num_predict: 1024
   ingestion_agent:
     name: "qwen3:8b"
     num_ctx: 8192

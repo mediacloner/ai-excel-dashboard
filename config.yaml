@@ -1,0 +1,45 @@
+models:
+  schema_mapping:
+    name: "qwen3:8b"
+    num_ctx: 8192
+    keep_alive: "5m"
+    temperature: 0.1
+    format: "json"
+  text_to_sql:
+    name: "qwen3:8b"
+    num_ctx: 4096
+    keep_alive: "5m"
+    temperature: 0.0
+    stop: [";"]
+  dashboard_agent:
+    name: "qwen3:8b"
+    num_ctx: 16384
+    keep_alive: "5m"
+    temperature: 0.3
+  ingestion_agent:
+    name: "qwen3:8b"
+    num_ctx: 8192
+    keep_alive: "5m"
+    temperature: 0.1
+
+database:
+  engine: "duckdb"
+  path: "data/warehouse.duckdb"
+  query_timeout_seconds: 10
+  max_result_rows: 5000
+
+ingestion:
+  sample_rows: 10
+  max_columns: 100
+  max_file_size_mb: 50
+  max_rows: 500000
+  allowed_extensions: [".xlsx", ".xls", ".csv"]
+  llm_retry_attempts: 3
+  upload_dir: "data/uploads"
+
+profiling:
+  null_threshold_warning: 0.3
+  unique_ratio_categorical: 0.05
+
+langgraph:
+  checkpoint_db: "data/langgraph_state.db"

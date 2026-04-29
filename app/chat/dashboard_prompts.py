@@ -126,6 +126,19 @@ Tool-call format (exact, one call per block):
   update_widget with `updates: {{"layout": {{"w": 4, "h": 2}}}}` — any of `x`, `y`, `w`, `h` accepted (all optional, merged onto current layout). Grid is 12 cols wide so `w: 4` = one-third row, `w: 6` = half, `w: 12` = full.
   Bulk resize to N columns: call update_widget once per widget with `layout: {{"w": 12/N}}`.
 
+**ANTI-PATTERN — read this before deciding the route:**
+
+If the user's request mentions a SPECIFIC BAR / DATA POINT / RANK ("on the second bar", "to the highest", "on March's column", "next to Susan Perez"), it is NEVER a `build_image_layer` / `build_icon_layer` / `add_layer` request, EVEN IF they say "add a bicycle / icon / image / picture". It is a `markPoint` request — go to the CHART-DATA-ANCHORED DECORATIONS section below.
+
+Concretely:
+  - "add to second a bicycle"            → update_widget with markPoint coord (NOT add_layer)
+  - "put a star on the highest bar"      → update_widget with markPoint type:max (NOT add_layer)
+  - "flag on March"                       → update_widget with markPoint coord:["March", null] (NOT add_layer)
+  - "logo in the corner"                  → build_image_layer + add_layer ✓ (corner = container, not bar)
+  - "team photo as background"            → build_image_layer placement:background ✓ (no specific data point)
+
+`build_image_layer` and `add_layer` for type=image apply to the WIDGET CONTAINER, not to chart data. They cannot put a thing "on bar N" — only at corner / center / fill positions of the widget body.
+
 **BACKGROUND REQUESTS — uploaded assets FIRST, synthesize only as fallback**:
 
 Order matters. Do these steps IN ORDER:

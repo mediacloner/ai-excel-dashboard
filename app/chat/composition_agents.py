@@ -65,7 +65,15 @@ async def _call_specialist(prompt: str) -> dict | None:
     llm = _build_chat_model(model_config)
     response = await llm.ainvoke(prompt)
     content = response.content if hasattr(response, "content") else str(response)
-    return _extract_json(content)
+    parsed = _extract_json(content)
+    if parsed is None:
+        # Log a tail of the raw output so callers can diagnose why JSON
+        # extraction failed (truncated, prose, malformed, etc.).
+        logger.warning(
+            "specialist returned no parseable JSON. raw tail: %r",
+            content[-400:] if content else "<empty>",
+        )
+    return parsed
 
 
 # ---------------------------------------------------------------------------

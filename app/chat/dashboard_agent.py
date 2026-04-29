@@ -24,9 +24,15 @@ from app.llm.client import _build_chat_model
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 20  # Max tool-call rounds. Multi-widget requests can need
-# 2 rounds per widget (query_data + create_*_widget) plus retries; 10 was
-# too tight for a 3-widget dashboard with one error along the way.
+MAX_TOOL_ROUNDS = 12  # Max tool-call rounds. Multi-widget requests can need
+# 2 rounds per widget (query_data + create_*_widget) plus retries. We also
+# enforce REPEAT_FAILURE_THRESHOLD below to catch tight retry loops earlier
+# than the round budget.
+
+# If the LLM emits the same tool name with errors this many times in a row,
+# we abort the loop and surface a clear error to the user. Catches Qwen3's
+# "retry the same broken create_composed_widget forever" failure mode.
+REPEAT_FAILURE_THRESHOLD = 2
 
 
 async def run_dashboard_chat_stream(
@@ -97,6 +103,11 @@ async def run_dashboard_chat_stream(
     # Agent loop: call LLM, parse, execute tools, repeat
     llm = _build_chat_model(model_config)
 
+    # Anti-loop tracking. (tool_name, last_error) tuple — if it repeats
+    # REPEAT_FAILURE_THRESHOLD times, we bail with an explicit error.
+    last_failure: tuple[str, str] | None = None
+    failure_streak = 0
+
     for round_num in range(MAX_TOOL_ROUNDS):
         try:
             # Stream tokens in real-time, buffer tool_call blocks
@@ -152,6 +163,25 @@ async def run_dashboard_chat_stream(
                                     for event in events:
                                         yield event
 
+                                    # Anti-loop: if the same tool errors with
+                                    # the same error twice in a row, abort.
+                                    err = result.get("error") if isinstance(result, dict) else None
+                                    if err:
+                                        sig = (tool_name, str(err)[:120])
+                                        if sig == last_failure:
+                                            failure_streak += 1
+                                        else:
+                                            last_failure, failure_streak = sig, 1
+                                        if failure_streak >= REPEAT_FAILURE_THRESHOLD:
+                                            yield sse_error(
+                                                f"Aborting after {failure_streak} repeated failures of '{tool_name}': {err}",
+                                                recoverable=False,
+                                            )
+                                            yield sse_done()
+                                            return
+                                    else:
+                                        last_failure, failure_streak = None, 0
+
                                     # Feed result back for next round
                                     tool_result_str = format_tool_result_for_llm(tool_name, result)
                                     messages.append({"role": "assistant", "content": full_response})
@@ -192,6 +222,22 @@ async def run_dashboard_chat_stream(
                                     )
                                     for event in events:
                                         yield event
+                                    err = result.get("error") if isinstance(result, dict) else None
+                                    if err:
+                                        sig = (tool_name, str(err)[:120])
+                                        if sig == last_failure:
+                                            failure_streak += 1
+                                        else:
+                                            last_failure, failure_streak = sig, 1
+                                        if failure_streak >= REPEAT_FAILURE_THRESHOLD:
+                                            yield sse_error(
+                                                f"Aborting after {failure_streak} repeated failures of '{tool_name}': {err}",
+                                                recoverable=False,
+                                            )
+                                            yield sse_done()
+                                            return
+                                    else:
+                                        last_failure, failure_streak = None, 0
                                     tool_result_str = format_tool_result_for_llm(tool_name, result)
                                     messages.append({"role": "assistant", "content": full_response})
                                     messages.append({"role": "user", "content": f"<tool_response>\n{tool_result_str}\n</tool_response>"})
@@ -250,6 +296,22 @@ async def run_dashboard_chat_stream(
                     )
                     for event in events:
                         yield event
+                    err = result.get("error") if isinstance(result, dict) else None
+                    if err:
+                        sig = (tool_name, str(err)[:120])
+                        if sig == last_failure:
+                            failure_streak += 1
+                        else:
+                            last_failure, failure_streak = sig, 1
+                        if failure_streak >= REPEAT_FAILURE_THRESHOLD:
+                            yield sse_error(
+                                f"Aborting after {failure_streak} repeated failures of '{tool_name}': {err}",
+                                recoverable=False,
+                            )
+                            yield sse_done()
+                            return
+                    else:
+                        last_failure, failure_streak = None, 0
                     tool_result_str = format_tool_result_for_llm(tool_name, result)
                     messages.append({"role": "assistant", "content": full_response})
                     messages.append({"role": "user", "content": f"<tool_response>\n{tool_result_str}\n</tool_response>"})
@@ -285,6 +347,22 @@ async def run_dashboard_chat_stream(
                             )
                             for event in events:
                                 yield event
+                            err = result.get("error") if isinstance(result, dict) else None
+                            if err:
+                                sig = (tool_name, str(err)[:120])
+                                if sig == last_failure:
+                                    failure_streak += 1
+                                else:
+                                    last_failure, failure_streak = sig, 1
+                                if failure_streak >= REPEAT_FAILURE_THRESHOLD:
+                                    yield sse_error(
+                                        f"Aborting after {failure_streak} repeated failures of '{tool_name}': {err}",
+                                        recoverable=False,
+                                    )
+                                    yield sse_done()
+                                    return
+                            else:
+                                last_failure, failure_streak = None, 0
                             tool_result_str = format_tool_result_for_llm(tool_name, result)
                             messages.append({"role": "assistant", "content": full_response})
                             messages.append({"role": "user", "content": f"<tool_response>\n{tool_result_str}\n</tool_response>"})

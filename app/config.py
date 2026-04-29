@@ -15,6 +15,10 @@ class ModelConfig(BaseModel):
     # default (often unlimited within num_ctx). Set this for agents that
     # could otherwise loop in <think> blocks.
     num_predict: int | None = None
+    # Reasoning / thinking control for models that support it (Qwen3, etc).
+    # `False` disables <think> blocks entirely — saves tokens, faster
+    # responses for tool-calling. `True` enables. None = model default.
+    reasoning: bool | None = None
 
 
 class ModelsConfig(BaseModel):

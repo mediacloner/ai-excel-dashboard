@@ -17,10 +17,13 @@ models:
     keep_alive: "5m"
     temperature: 0.3
     # Hard cap so a runaway <think> block can't generate for minutes.
-    # Combined with `/no_think` in the system prompt this is more than
-    # enough for any single tool call — we observed runaways at 4000+
-    # tokens stalling the agent on the 2nd/3rd widget.
+    # 1024 is plenty for any single tool call when reasoning is off.
     num_predict: 1024
+    # Disable Qwen3's <think>...</think> blocks entirely. The /no_think
+    # prompt directive is unreliable; this is the API-level off switch.
+    # Without it Qwen3 spends 800+ tokens thinking before emitting JSON,
+    # so a 1024-token cap leaves no room for the actual tool call.
+    reasoning: false
   ingestion_agent:
     name: "qwen3:8b"
     num_ctx: 8192

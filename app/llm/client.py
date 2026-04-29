@@ -23,6 +23,8 @@ def _build_chat_model(model_config: ModelConfig) -> ChatOllama:
         kwargs["stop"] = model_config.stop
     if model_config.num_predict is not None:
         kwargs["num_predict"] = model_config.num_predict
+    if model_config.reasoning is not None:
+        kwargs["reasoning"] = model_config.reasoning
     return ChatOllama(**kwargs)
 
 

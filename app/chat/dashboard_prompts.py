@@ -172,9 +172,39 @@ If you specify `placement`, you can omit `z` entirely. Legacy `z: -1` still work
   Every layer needs `type`. Without it the renderer can't know what to draw.
 
 **ICONS — `lucide` icons by name, no asset upload required:**
-- Use `build_icon_layer` (existing widget) or include `icons: [...]` in `create_composed_widget`. Pick a name from the lucide library (kebab-case is fine — the renderer normalises): `trending-up`, `trending-down`, `minus`, `arrow-up`, `arrow-down`, `bar-chart`, `line-chart`, `pie-chart`, `activity`, `target`, `check`, `check-circle`, `x`, `x-circle`, `alert-triangle`, `alert-circle`, `info`, `star`, `heart`, `zap`, `flame`, `award`, `trophy`, `dollar-sign`, `percent`, `hash`, `calendar`, `clock`, `users`, `user`, `shopping-cart`, `package`, `truck`, `building`, `home`, `globe`, `eye`, `filter`, `search`, `settings`, `refresh-cw`.
+- Use `build_icon_layer` (existing widget) or include `icons: [...]` in `create_composed_widget`. Pick a name from the lucide library (kebab-case is fine — the renderer normalises): `trending-up`, `trending-down`, `minus`, `arrow-up`, `arrow-down`, `bar-chart`, `line-chart`, `pie-chart`, `activity`, `target`, `check`, `check-circle`, `x`, `x-circle`, `alert-triangle`, `alert-circle`, `info`, `star`, `heart`, `zap`, `flame`, `award`, `trophy`, `crown`, `medal`, `gem`, `diamond`, `sparkles`, `rocket`, `party-popper`, `thumbs-up`, `dollar-sign`, `percent`, `hash`, `calendar`, `clock`, `users`, `user`, `shopping-cart`, `package`, `truck`, `building`, `home`, `globe`, `eye`, `filter`, `search`, `settings`, `refresh-cw`.
 - Icons accept `color` (CSS), `size` ([w,h] px or single int), `anchor`, `offset`, `placement`. Default placement is `overlay` (on top of the chart).
 - Prefer icons over generating SVG markup whenever a lucide name fits — they're crisp, themable, and don't require asset uploads.
+
+**NAMED OBJECTS NEVER GO IN SVG MARKUP — REDIRECT TO icons OR markPoint:**
+
+The user may casually say "SVG" when they mean "a small visual symbol". Treat that word as a request for a SHAPE, not for raw SVG code. The icon library has 3000+ named shapes — use them. Authoring SVG markup for a recognizable object (crown, trophy, flag, car, person, …) almost always produces a generic blob because SVG geometry is hard to write from scratch.
+
+  Decision rule:
+  * Named recognisable shape (crown, trophy, star, flame, heart, gem, medal, award, sparkles, rocket, target, party-popper, thumbs-up, diamond) → **icon layer** with that lucide name. NEVER `type: "svg"`. NEVER author `<svg>` markup. NOT EVEN IF the user says "an SVG of a crown" — use `icon name: "crown"`.
+  * Abstract style/mood (gradient, dots, paper-texture, starry-sky, neon-glow, confetti) → `type: "svg"` is allowed, follows the BACKGROUND REQUESTS rules above.
+
+**CHART-DATA-ANCHORED DECORATIONS — use ECharts `markPoint` with `@<name>` aliases:**
+
+When the user asks for an icon ON a specific data point ("a crown on the #1 bar", "a flame on the highest sales month", "a star on the top product"), DO NOT add an icon layer in container coordinates — it won't follow the bar. Use ECharts' built-in `markPoint` on the relevant series. The backend resolves `@<name>` symbol aliases to real path data:
+
+```
+"series": [{{
+  "type": "bar",
+  "data": [...],
+  "markPoint": {{
+    "symbol": "@crown",
+    "symbolSize": [32, 32],
+    "itemStyle": {{"color": "#fbbf24"}},
+    "label": {{"show": false}},
+    "data": [{{"type": "max"}}]
+  }}
+}}]
+```
+
+`type: "max"` auto-anchors to the highest value, `"min"` to lowest, or pass `{{"coord": [x, y]}}` for an explicit point. Available `@<name>` aliases: `@crown`, `@trophy`, `@award`, `@medal`, `@star`, `@sparkles`, `@flame`, `@gem`, `@heart`, `@zap`, `@rocket`, `@target`, `@diamond`, `@thumbs-up`, `@party-popper`. Recolor via `itemStyle.color`.
+
+For top-N horizontal bar charts, also pass `series[0].sort: "ascending"` (with the largest value at the BOTTOM in horizontal orientation) so the visual order matches the data ranking.
 
 **ASSET MATCHING — fuzzy / similarity-based** (be helpful, not pedantic — applies only to path B):
 

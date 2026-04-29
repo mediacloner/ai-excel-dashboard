@@ -10,6 +10,7 @@ from json_repair import repair_json
 
 from app.chat.agent import execute_user_query
 from app.chat.composition_agents import design_chart_layer
+from app.chat.echarts_symbols import resolve_aliases as _resolve_echarts_aliases
 from app.chat.streaming import (
     sse_tool_call_result,
     sse_tool_call_start,
@@ -169,6 +170,10 @@ def _exec_create_chart(args: dict, dashboard_id: str) -> dict:
     sql_query = args.get("sql_query", "")
     width = args.get("width", 6)
     height = args.get("height", 2)
+
+    # Rewrite "@crown" / "@trophy" / … aliases anywhere in the option
+    # tree into real `path://<d>` strings ECharts can render.
+    echarts_option = _resolve_echarts_aliases(echarts_option)
 
     if not _chart_has_data(echarts_option):
         return {"error": "Chart series data is empty. Run query_data first (use the exact `table_name` from Available Datasets, not the dataset label), then build the echarts_option with real numbers."}
@@ -369,6 +374,9 @@ async def _exec_create_composed_widget(args: dict, dashboard_id: str) -> dict:
             chart_layer.setdefault("type", "chart")
             chart_layer.setdefault("anchor", "fill")
             chart_layer.setdefault("z", 0)
+            # Resolve `@crown`-style aliases inside echarts_option before validation.
+            if chart_layer.get("echarts_option"):
+                chart_layer["echarts_option"] = _resolve_echarts_aliases(chart_layer["echarts_option"])
             if not _chart_has_data(chart_layer.get("echarts_option") or {}):
                 return {"error": "Chart specialist produced an empty chart (series data missing). Re-run create_composed_widget — ensure query_data has returned rows first, and describe the data in `chart.intent` so the specialist fills series[0].data."}
             layers.append(chart_layer)
@@ -717,6 +725,8 @@ def _exec_update_widget(args: dict) -> dict:
         update_widget_layout(widget_id, new_layout)
 
     if isinstance(updates, dict) and "echarts_option" in updates:
+        # Resolve `@crown`-style aliases inside the partial option update too.
+        updates["echarts_option"] = _resolve_echarts_aliases(updates["echarts_option"])
         layers = current.config.get("layers") or []
         if layers:
             # Redirect: merge into the first chart layer, not top-level.

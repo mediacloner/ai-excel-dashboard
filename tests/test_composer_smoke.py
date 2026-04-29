@@ -174,6 +174,48 @@ class TestComposedWidgetWithIcons:
         assert "error" in result
         assert "No layers" in result["error"]
 
+    async def test_chart_specialist_alias_resolved(self, monkeypatch, fake_db):
+        """When the chart specialist emits an @crown symbol in markPoint,
+        the composer must rewrite it to a real path://... before persisting."""
+        from app.chat import tools
+
+        async def fake_specialist(intent, data_summary):
+            return {
+                "id": "chart",
+                "type": "chart",
+                "anchor": "fill",
+                "echarts_option": {
+                    "yAxis": {"type": "category", "data": ["A", "B", "C"]},
+                    "xAxis": {"type": "value"},
+                    "series": [{
+                        "type": "bar",
+                        "data": [10, 20, 30],
+                        "markPoint": {
+                            "symbol": "@crown",
+                            "symbolSize": [32, 32],
+                            "itemStyle": {"color": "gold"},
+                            "data": [{"type": "max"}],
+                        },
+                    }],
+                },
+            }
+
+        monkeypatch.setattr(tools, "design_chart_layer", fake_specialist)
+
+        events, result = await execute_tool(
+            "create_composed_widget",
+            {"title": "Top customers", "chart": {"intent": "horizontal bar with crown on max"}},
+            dashboard_id="d1",
+            space_id="s1",
+        )
+        assert "widget" in result, result
+        chart_layer = next(
+            l for l in fake_db["config"]["layers"] if l.get("type") == "chart"
+        )
+        sym = chart_layer["echarts_option"]["series"][0]["markPoint"]["symbol"]
+        assert sym.startswith("path://"), f"alias unresolved: {sym!r}"
+        assert "@crown" not in sym
+
     async def test_icon_explicit_placement_preserved(self, fake_db):
         events, result = await execute_tool(
             "create_composed_widget",
